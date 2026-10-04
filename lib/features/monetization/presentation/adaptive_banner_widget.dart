@@ -53,56 +53,66 @@ class _AdaptiveBannerWidgetState extends State<AdaptiveBannerWidget>
     }
 
     _isLoading = true;
-    _bannerAd?.dispose();
-    _bannerAd = BannerAd(
-      adUnitId: adUnitId,
-      request: const AdRequest(),
-      size: AdSize.banner,
-      listener: BannerAdListener(
-        onAdLoaded: (ad) {
-          debugPrint('AdaptiveBannerWidget: Ad loaded successfully');
-          _retryAttempts = 0;
-          _retryTimer?.cancel();
-          if (mounted) {
-            setState(() {
-              _isLoaded = true;
-              _isLoading = false;
-            });
-          }
-        },
-        onAdFailedToLoad: (ad, err) {
-          debugPrint(
-              'AdaptiveBannerWidget: Failed to load: $err (attempt: $_retryAttempts)');
-          ad.dispose();
-          if (mounted) {
-            setState(() {
-              _isLoaded = false;
-              _isLoading = false;
-              _bannerAd = null;
-            });
-
-            // Exponential / progressive retry backoff if failed (e.g. startup network latency)
-            if (_retryAttempts < _maxRetryAttempts) {
-              _retryAttempts++;
-              final delaySeconds = _retryAttempts * 3; // 3s, 6s, 9s, 12s, 15s
-              _retryTimer?.cancel();
-              _retryTimer = Timer(Duration(seconds: delaySeconds), () {
-                if (mounted && !_isLoaded && !_isLoading) {
-                  _loadBanner();
-                }
+    try {
+      _bannerAd?.dispose();
+      _bannerAd = BannerAd(
+        adUnitId: adUnitId,
+        request: const AdRequest(),
+        size: AdSize.banner,
+        listener: BannerAdListener(
+          onAdLoaded: (ad) {
+            debugPrint('AdaptiveBannerWidget: Ad loaded successfully');
+            _retryAttempts = 0;
+            _retryTimer?.cancel();
+            if (mounted) {
+              setState(() {
+                _isLoaded = true;
+                _isLoading = false;
               });
             }
-          }
-        },
-      ),
-    )..load();
+          },
+          onAdFailedToLoad: (ad, err) {
+            debugPrint(
+                'AdaptiveBannerWidget: Failed to load: $err (attempt: $_retryAttempts)');
+            try {
+              ad.dispose();
+            } catch (_) {}
+            if (mounted) {
+              setState(() {
+                _isLoaded = false;
+                _isLoading = false;
+                _bannerAd = null;
+              });
+
+              // Exponential / progressive retry backoff if failed (e.g. startup network latency)
+              if (_retryAttempts < _maxRetryAttempts) {
+                _retryAttempts++;
+                final delaySeconds = _retryAttempts * 5; // 5s, 10s, 15s, 20s, 25s
+                _retryTimer?.cancel();
+                _retryTimer = Timer(Duration(seconds: delaySeconds), () {
+                  if (mounted && !_isLoaded && !_isLoading) {
+                    _loadBanner();
+                  }
+                });
+              }
+            }
+          },
+        ),
+      )..load();
+    } catch (e) {
+      debugPrint('AdaptiveBannerWidget: Error initializing banner: $e');
+      _isLoading = false;
+      _bannerAd = null;
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _retryTimer?.cancel();
-    _bannerAd?.dispose();
+    try {
+      _bannerAd?.dispose();
+    } catch (_) {}
     super.dispose();
   }
 
@@ -110,15 +120,6 @@ class _AdaptiveBannerWidgetState extends State<AdaptiveBannerWidget>
   Widget build(BuildContext context) {
     if (kIsWeb || (!Platform.isAndroid && !Platform.isIOS)) {
       return const SizedBox.shrink();
-    }
-
-    // Auto-recover/load if ad is not loaded and not in loading state
-    if (!_isLoaded && !_isLoading && _bannerAd == null && _retryAttempts < _maxRetryAttempts) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && !_isLoaded && !_isLoading && _bannerAd == null) {
-          _loadBanner();
-        }
-      });
     }
 
     // Reserve fixed height (50dp standard banner height)
